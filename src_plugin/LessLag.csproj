@@ -16,7 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="GameScripts">
-      <HintPath>$(GAME_PATH)\Stacklands_Data\Managed\publicized_assemblies\GameScripts_publicized.dll</HintPath>
+      <HintPath>$(GAME_PATH)\Stacklands_Data\Managed\publicized_assemblies\GameScripts_patched.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="SokLoc">

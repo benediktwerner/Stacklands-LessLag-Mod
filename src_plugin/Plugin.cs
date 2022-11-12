@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Reflection.Emit;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
@@ -16,96 +17,239 @@ namespace LessLag
     {
         static ManualLogSource logger;
 
-        static ConfigEntry<bool> optFindMatchingPrint;
+        static ConfigEntry<bool> FastCardPush;
+        static ConfigEntry<int> PushEveryFrames;
+        static ConfigEntry<int> BuyBoosterBoxEveryFrames;
+
+        static int UpdatePushFrame = 1;
+        static int FrameCount = 0;
 
         private void Awake()
         {
             logger = Logger;
-            optFindMatchingPrint = Config.Bind("General", "OptimizeFindMatchingPrint", true);
+            FastCardPush = Config.Bind("General", "Fast Card Push", true);
+            PushEveryFrames = Config.Bind(
+                "General",
+                "Check Card Push Every X Frames",
+                5,
+                "Values above 1 make card pushing more janky but give large performance benefits"
+            );
+            BuyBoosterBoxEveryFrames = Config.Bind(
+                "General",
+                "Update BuyBoosterBox Every X Frames",
+                1,
+                "Values above 1 make the booster shop a bit janky for a minor performance benefit"
+            );
+
+            PushEveryFrames.SettingChanged += (_, _) => UpdatePushFrame = FrameCount + 1;
+
             Harmony.CreateAndPatchAll(typeof(Plugin));
-            logger.LogDebug("bene:");
-            logger.LogDebug(AccessTools.Field(typeof(CardData), "Bene"));
         }
 
-        public static int FrameCount = 0;
-
-        static float nextClear = 0;
-        static Dictionary<CardData, Subprint> previousSubprint =
-            new Dictionary<CardData, Subprint>();
-
-        // static HashSet<CardData> descriptionSet;
-
-        void Update()
+        public void Update()
         {
             FrameCount++;
-
-            if (Time.time > nextClear)
-            {
-                nextClear = Time.time + 30 + 30 * Random.value;
-                var newDict = new Dictionary<CardData, Subprint>();
-                foreach (var item in previousSubprint)
-                {
-                    if (!item.Key.MyGameCard.Destroyed)
-                        newDict[item.Key] = item.Value;
-                }
-                previousSubprint = newDict;
-            }
         }
 
         [HarmonyPrefix]
-        [HarmonyPatch(typeof(CardData), nameof(CardData.FindMatchingPrint))]
-        public static void OptimizeFindMatchingPrint(
-            CardData __instance,
-            out Subprint __result,
+        [HarmonyPatch(typeof(BuyBoosterBox), nameof(BuyBoosterBox.Update))]
+        public static void ReduceBuyBoosterBoxUpdate(
+            BuyBoosterBox __instance,
             out bool __runOriginal
         )
         {
-            __result = null;
-            if (__runOriginal = !optFindMatchingPrint.Value)
+            __runOriginal = FrameCount % BuyBoosterBoxEveryFrames.Value == 0;
+        }
+
+        [HarmonyReversePatch]
+        [HarmonyPatch(typeof(CardData), nameof(CardData.UpdateCard))]
+        public static void CardData_UpdateCard(CardData __instance) { }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(Equipable), nameof(Equipable.UpdateCard))]
+        public static void ReduceEquipableUpdate(Equipable __instance, out bool __runOriginal)
+        {
+            __runOriginal = !__instance.BeneUpdatedOnce;
+            if (!__runOriginal)
+                CardData_UpdateCard(__instance);
+            else
+                __instance.BeneUpdatedOnce = true;
+        }
+
+        [HarmonyPrefix]
+        [HarmonyPatch(typeof(GameCard), nameof(GameCard.LateUpdate))]
+        public static void GameCardPostUpdate(GameCard __instance, out bool __runOriginal)
+        {
+            if (__runOriginal = !FastCardPush.Value)
                 return;
 
-            if (
-                !StackChanged(__instance.MyGameCard)
-                && previousSubprint.TryGetValue(__instance, out var print)
-            )
-            {
-                __result = print;
+            if (__instance.MyBoard == null || !__instance.MyBoard.IsCurrent)
                 return;
+
+            if (__instance.Parent == null && __instance.EquipmentHolder == null)
+                __instance.ClampPos();
+
+            if (__instance.Parent != null)
+                __instance.LastParent = __instance.Parent;
+            else
+            {
+                if (FrameCount == UpdatePushFrame)
+                    __instance.BeneFrameMod = Random.RandomRangeInt(0, PushEveryFrames.Value);
+                if (FrameCount % PushEveryFrames.Value == __instance.BeneFrameMod)
+                    PushAwayFromOthers(__instance);
             }
 
-            int fullyMatchedAt = int.MaxValue;
-            int matchCount = int.MinValue;
-            foreach (var blueprint in WorldManager.instance.BlueprintPrefabs)
+            if (__instance.removedChild == null || !__instance.removedChild.BeingDragged)
+                __instance.BeneLastChild = __instance.Child;
+        }
+
+        static void PushAwayFromOthers(GameCard root)
+        {
+            if (!root.CanBePushed())
+                return;
+
+            var child = root;
+            do
             {
-                Subprint matchingSubprint = blueprint.GetMatchingSubprint(
-                    __instance.MyGameCard,
-                    out var subprintMatchInfo
+                child.BeneRoot = root;
+                child = child.Child;
+            } while (child != null);
+
+            child = root;
+            while (true)
+            {
+                int num = PhysicsExtensions.OverlapBoxNonAlloc(
+                    child.boxCollider,
+                    child.hits,
+                    -5,
+                    0
                 );
-                if (
-                    matchingSubprint != null
-                    && (
-                        subprintMatchInfo.MatchCount > matchCount
-                        || (
-                            subprintMatchInfo.MatchCount == matchCount
-                            && subprintMatchInfo.FullyMatchedAt < fullyMatchedAt
-                        )
-                    )
-                )
+                for (int i = 0; i < num; i++)
                 {
-                    fullyMatchedAt = subprintMatchInfo.FullyMatchedAt;
-                    matchCount = subprintMatchInfo.MatchCount;
-                    __result = matchingSubprint;
+                    var component = child.hits[i].gameObject.GetComponent<Draggable>();
+                    if (
+                        component != null
+                        && !(component is GameCard g && g.BeneRoot == root)
+                        && !component.BeingDragged
+                        && CanBePushedBy(child, component)
+                    )
+                    {
+                        Vector3 vector = component.transform.position - root.transform.position;
+                        vector.y = 0f;
+                        float num2 = root.Mass + component.Mass;
+                        float num3 = 1f - root.Mass / num2;
+                        if (component.PushDir != null)
+                        {
+                            vector = component.PushDir.Value;
+                            num3 = 1f;
+                        }
+                        root.TargetPosition -=
+                            num3 * vector.normalized * 2f * Time.deltaTime * PushEveryFrames.Value;
+                        return;
+                    }
+                }
+
+                if (child.Child == null)
+                    return;
+                child = child.Child;
+
+                for (int i = 0; i < 5; i++)
+                {
+                    if (child.Child == null)
+                        break;
+                    child = child.Child;
                 }
             }
+        }
 
-            previousSubprint[__instance] = __result;
+        static bool CanBePushedBy(GameCard card, Draggable other)
+        {
+            if (other is GameCard otherCard)
+            {
+                if (
+                    otherCard.BounceTarget != null
+                    || otherCard.Destroyed
+                    || !otherCard.PushEnabled
+                    || (otherCard.CardData is Food && WorldManager.instance.InEatingAnimation)
+                    || otherCard.IsEquipped
+                    || !card.CardData.CanBePushedBy(otherCard.CardData)
+                )
+                    return false;
+            }
+            return (other is not InventoryInteractable)
+                && !other.BeingDragged
+                && (other.Velocity == null || other.Velocity.Value.y < 0f);
+        }
+
+        [HarmonyTranspiler]
+        [HarmonyPatch(typeof(CardData), nameof(CardData.UpdateCard))]
+        public static IEnumerable<CodeInstruction> UpdateCardTranspiler(
+            IEnumerable<CodeInstruction> instructions
+        )
+        {
+            // if (this.MyGameCard.Parent == null)
+            // -> add && StackChanged(this.MyGameCard)
+            // and remove the second bluepring computation after this if-else
+            var matcher = new CodeMatcher(instructions)
+                .MatchForward(
+                    true,
+                    new CodeMatch(OpCodes.Br),
+                    new CodeMatch(OpCodes.Ldarg_0),
+                    new CodeMatch(OpCodes.Ldfld),
+                    new CodeMatch(OpCodes.Ldarg_0),
+                    new CodeMatch(OpCodes.Ldstr, "FinishBlueprint"),
+                    new CodeMatch(OpCodes.Call),
+                    new CodeMatch(
+                        OpCodes.Callvirt,
+                        AccessTools.Method(typeof(GameCard), nameof(GameCard.CancelTimer))
+                    ),
+                    new CodeMatch(OpCodes.Br)
+                )
+                .ThrowIfInvalid("Didn't find CancelTimer(FinishBlueprint)");
+            var label = matcher.Instruction.operand;
+            return matcher
+                .MatchForward(true, new CodeMatch(OpCodes.Callvirt))
+                .ThrowIfInvalid("Didn't find second CancelTimer(FinishBlueprint)")
+                .Advance(1)
+                .SetOpcodeAndAdvance(OpCodes.Nop)
+                .RemoveInstructions(18)
+                .MatchBack(
+                    true,
+                    new CodeMatch(OpCodes.Ldarg_0),
+                    new CodeMatch(
+                        OpCodes.Ldfld,
+                        AccessTools.Field(typeof(CardData), nameof(CardData.MyGameCard))
+                    ),
+                    new CodeMatch(
+                        OpCodes.Ldfld,
+                        AccessTools.Field(typeof(GameCard), nameof(GameCard.Parent))
+                    ),
+                    new CodeMatch(OpCodes.Ldnull),
+                    new CodeMatch(OpCodes.Call),
+                    new CodeMatch(OpCodes.Brfalse)
+                )
+                .ThrowIfInvalid("Didn't find Parent == null check")
+                .Advance(1)
+                .Insert(
+                    new CodeInstruction(OpCodes.Ldarg_0),
+                    new CodeInstruction(
+                        OpCodes.Ldfld,
+                        AccessTools.Field(typeof(CardData), nameof(CardData.MyGameCard))
+                    ),
+                    new CodeInstruction(
+                        OpCodes.Call,
+                        AccessTools.Method(typeof(Plugin), nameof(Plugin.StackChanged))
+                    ),
+                    new CodeInstruction(OpCodes.Brfalse, label)
+                )
+                .InstructionEnumeration();
         }
 
         static bool StackChanged(GameCard card)
         {
             while (card != null)
             {
-                if (card.LastParent != card.Parent)
+                if (card.BeneLastChild != card.Child)
                     return true;
                 card = card.Child;
             }

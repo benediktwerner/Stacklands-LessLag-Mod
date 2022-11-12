@@ -7,11 +7,16 @@
     <Version>1.0.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <LangVersion>latest</LangVersion>
+    <Configurations>Release;Release_Run</Configurations>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BepInEx.Core" Version="5.*" />
     <PackageReference Include="Mono.Cecil" Version="0.10.4" />
   </ItemGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release_Run'">
+    <DefineConstants>RUN</DefineConstants>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
   <PropertyGroup>
     <GAME_PATH>G:\Steam\steamapps\common\Stacklands</GAME_PATH>
     <OUTPUT_PATH>$(GAME_PATH)/BepInEx/patchers</OUTPUT_PATH>
