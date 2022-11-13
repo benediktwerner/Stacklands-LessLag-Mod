@@ -21,7 +21,6 @@ namespace LessLag
         static ConfigEntry<int> PushEveryFrames;
         static ConfigEntry<int> BuyBoosterBoxEveryFrames;
 
-        static int UpdatePushFrame = 1;
         static int FrameCount = 0;
 
         private void Awake()
@@ -41,7 +40,11 @@ namespace LessLag
                 "Values above 1 make the booster shop a bit janky for a minor performance benefit"
             );
 
-            PushEveryFrames.SettingChanged += (_, _) => UpdatePushFrame = FrameCount + 1;
+            PushEveryFrames.SettingChanged += (_, _) =>
+            {
+                foreach (var card in WorldManager.instance.AllCards)
+                    card.BeneFrameMod = 0;
+            };
 
             Harmony.CreateAndPatchAll(typeof(Plugin));
         }
@@ -78,12 +81,21 @@ namespace LessLag
 
         [HarmonyPrefix]
         [HarmonyPatch(typeof(GameCard), nameof(GameCard.LateUpdate))]
-        public static void GameCardPostUpdate(GameCard __instance, out bool __runOriginal)
+        public static void GameCardLateUpdate(GameCard __instance, out bool __runOriginal)
         {
-            if (__runOriginal = !FastCardPush.Value)
-                return;
-
             if (__instance.MyBoard == null || !__instance.MyBoard.IsCurrent)
+            {
+                __runOriginal = false;
+                return;
+            }
+
+            __instance.BeneChildChanged =
+                __instance.BeneLastChild != __instance.Child
+                && (__instance.removedChild == null || !__instance.removedChild.BeingDragged);
+            if (__instance.BeneChildChanged)
+                __instance.BeneLastChild = __instance.Child;
+
+            if (__runOriginal = !FastCardPush.Value)
                 return;
 
             if (__instance.Parent == null && __instance.EquipmentHolder == null)
@@ -93,14 +105,11 @@ namespace LessLag
                 __instance.LastParent = __instance.Parent;
             else
             {
-                if (FrameCount == UpdatePushFrame)
-                    __instance.BeneFrameMod = Random.RandomRangeInt(0, PushEveryFrames.Value);
-                if (FrameCount % PushEveryFrames.Value == __instance.BeneFrameMod)
+                if (__instance.BeneFrameMod == 0)
+                    __instance.BeneFrameMod = Random.RandomRangeInt(1, PushEveryFrames.Value + 1);
+                if (FrameCount % PushEveryFrames.Value == __instance.BeneFrameMod - 1)
                     PushAwayFromOthers(__instance);
             }
-
-            if (__instance.removedChild == null || !__instance.removedChild.BeingDragged)
-                __instance.BeneLastChild = __instance.Child;
         }
 
         static void PushAwayFromOthers(GameCard root)
@@ -136,15 +145,19 @@ namespace LessLag
                     {
                         Vector3 vector = component.transform.position - root.transform.position;
                         vector.y = 0f;
-                        float num2 = root.Mass + component.Mass;
-                        float num3 = 1f - root.Mass / num2;
+                        float avgMass = root.Mass + component.Mass;
+                        float velocity = 1f - root.Mass / avgMass;
                         if (component.PushDir != null)
                         {
                             vector = component.PushDir.Value;
-                            num3 = 1f;
+                            velocity = 1f;
                         }
                         root.TargetPosition -=
-                            num3 * vector.normalized * 2f * Time.deltaTime * PushEveryFrames.Value;
+                            velocity
+                            * vector.normalized
+                            * 2f
+                            * Time.deltaTime
+                            * PushEveryFrames.Value;
                         return;
                     }
                 }
@@ -249,7 +262,7 @@ namespace LessLag
         {
             while (card != null)
             {
-                if (card.BeneLastChild != card.Child)
+                if (card.BeneChildChanged)
                     return true;
                 card = card.Child;
             }

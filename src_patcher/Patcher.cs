@@ -17,6 +17,7 @@ public static class Patcher
 
         var gameCardType = module.GetType("GameCard");
         gameCardType.Fields.Add(new FieldDefinition("BeneLastChild", VISIBILITY, gameCardType));
+        gameCardType.Fields.Add(new FieldDefinition("BeneChildChanged", VISIBILITY, module.ImportReference(typeof(bool))));
         gameCardType.Fields.Add(new FieldDefinition("BeneRoot", VISIBILITY, gameCardType));
         gameCardType.Fields.Add(
             new FieldDefinition("BeneFrameMod", VISIBILITY, module.ImportReference(typeof(int)))

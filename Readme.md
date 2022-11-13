@@ -30,4 +30,5 @@ cp <bepinex dir>/core/Mono.Cecil.* src_patcher/bin/Release_RUN/net35/
 
 ## Changelog
 
+- v1.0.1: Fix bugs
 - v1.0: Initial release
