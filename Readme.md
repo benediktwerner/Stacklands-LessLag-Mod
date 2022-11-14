@@ -30,5 +30,9 @@ cp <bepinex dir>/core/Mono.Cecil.* src_patcher/bin/Release_RUN/net35/
 
 ## Changelog
 
+- v1.0.2:
+  - Fixed a bug where selling card in a crafting stack wouldn't stop the crafting
+  - Fixed a bug where taking a valid craftable stack from another stack wouldn't start crafting
+  - Fixed a bug where dropping a card and immediately picking up the new parent in the next frame wouldn't start crafting
 - v1.0.1: Fix bugs
 - v1.0: Initial release

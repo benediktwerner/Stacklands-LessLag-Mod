@@ -79,6 +79,32 @@ namespace LessLag
                 __instance.BeneUpdatedOnce = true;
         }
 
+        [HarmonyTranspiler]
+        [HarmonyPatch(typeof(GameCard), nameof(GameCard.StartBlueprintTimer))]
+        public static IEnumerable<CodeInstruction> AllowStartBlueprintTimerWhileDragged(
+            IEnumerable<CodeInstruction> instructions
+        )
+        {
+            return new CodeMatcher(instructions)
+                .MatchForward(
+                    false,
+                    new CodeMatch(OpCodes.Ldarg_0),
+                    new CodeMatch(
+                        OpCodes.Callvirt,
+                        AccessTools.PropertyGetter(
+                            typeof(Draggable),
+                            nameof(Draggable.BeingDragged)
+                        )
+                    ),
+                    new CodeMatch(OpCodes.Brfalse),
+                    new CodeMatch(OpCodes.Ret)
+                )
+                .ThrowIfInvalid("Didn't find BeingDragged check in StartBlueprintTimer")
+                .SetOpcodeAndAdvance(OpCodes.Nop)
+                .RemoveInstructions(3)
+                .InstructionEnumeration();
+        }
+
         [HarmonyPrefix]
         [HarmonyPatch(typeof(GameCard), nameof(GameCard.LateUpdate))]
         public static void GameCardLateUpdate(GameCard __instance, out bool __runOriginal)
@@ -90,7 +116,7 @@ namespace LessLag
             }
 
             __instance.BeneChildChanged =
-                __instance.BeneLastChild != __instance.Child
+                !object.ReferenceEquals(__instance.BeneLastChild, __instance.Child)
                 && (__instance.removedChild == null || !__instance.removedChild.BeingDragged);
             if (__instance.BeneChildChanged)
                 __instance.BeneLastChild = __instance.Child;
@@ -260,12 +286,14 @@ namespace LessLag
 
         static bool StackChanged(GameCard card)
         {
-            while (card != null)
+            if (card.LastParent != null)
+                return true;
+            do
             {
                 if (card.BeneChildChanged)
                     return true;
                 card = card.Child;
-            }
+            } while (card != null);
             return false;
         }
     }
