@@ -1,22 +1,20 @@
 # Stacklands LessLag Mod
 
-Reduces lag. Atm it seems to improve FPS by around 25%-33% with default settings.
+**This mod is DEPRECATED!**
 
-Specifically:
-- Avoids re-checking whether something can be crafted if a stack hasn't changed
-- Makes card-push-physics more efficient (at the cost of some jank)
-- Avoids updating unchanging equipment descriptions every frame
-- (Disabled by default) Updates booster shop less often
-
+The main performance improvement this mod used to do has been integrated into the game.
+There isn't really a point to installing it anymore and it probably won't work properly.
 
 ## Manual Installation
+
 This mod requires BepInEx to work. BepInEx is a modding framework which allows multiple mods to be loaded.
 
 1. Download and install BepInEx from the [Thunderstore](https://stacklands.thunderstore.io/package/BepInEx/BepInExPack_Stacklands/).
-4. Download this mod and extract it into the `BepInEx` directory
-5. Launch the game
+2. Download this mod and extract it into the `BepInEx` directory
+3. Launch the game
 
 ## Links
+
 - Github: https://github.com/benediktwerner/Stacklands-LessLag-Mod
 - Thunderstore: https://stacklands.thunderstore.io/package/benediktwerner/LessLag
 
@@ -30,6 +28,7 @@ cp <bepinex dir>/core/Mono.Cecil.* src_patcher/bin/Release_RUN/net35/
 
 ## Changelog
 
+- v1.0.3: Update README
 - v1.0.2:
   - Fixed a bug where selling card in a crafting stack wouldn't stop the crafting
   - Fixed a bug where taking a valid craftable stack from another stack wouldn't start crafting
